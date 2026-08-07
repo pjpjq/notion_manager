@@ -161,3 +161,79 @@ func TestDiscoverAccountFromTokenWithOptionsRejectsMismatchedSelector(t *testing
 		t.Fatalf("account = %#v, want nil", account)
 	}
 }
+
+func TestHandleAddAccountRejectsMismatchedExpectedEmail(t *testing.T) {
+	responseBody := `{
+  "recordMap": {
+    "notion_user": {
+      "target-user": {"value":{"value":{"name":"Target","email":"target@example.com"}}}
+    },
+    "user_root": {
+      "target-user": {"value":{"value":{"space_view_pointers":[{"spaceId":"target-space","id":"target-view"}]}}}
+    },
+    "space": {
+      "target-space": {"value":{"value":{"id":"target-space","name":"Target Space","plan_type":"team"}}}
+    },
+    "user_settings": {}
+  }
+}`
+	stubAccountDiscovery(t, responseBody, nil)
+
+	pool := NewAccountPool()
+	request := httptest.NewRequest(http.MethodPost, "/admin/accounts/add", strings.NewReader(
+		`{"token_v2":"secret-token","expected_email":"someone-else@example.com"}`,
+	))
+	recorder := httptest.NewRecorder()
+	HandleAddAccount(pool, t.TempDir(), NewDashboardAuth("", "")).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", recorder.Code, recorder.Body.String())
+	}
+	if pool.Count() != 0 {
+		t.Fatalf("pool count = %d, want 0", pool.Count())
+	}
+	bodyStr := recorder.Body.String()
+	if !strings.Contains(bodyStr, "does not belong to expected email") &&
+		!strings.Contains(bodyStr, "no user matched the configured Notion account selectors") {
+		t.Fatalf("error body = %q, want mismatch or selector-failure message", bodyStr)
+	}
+}
+
+func TestHandleAddAccountAcceptsMatchingExpectedEmail(t *testing.T) {
+	responseBody := `{
+  "recordMap": {
+    "notion_user": {
+      "target-user": {"value":{"value":{"name":"Target","email":"target@example.com"}}}
+    },
+    "user_root": {
+      "target-user": {"value":{"value":{"space_view_pointers":[{"spaceId":"target-space","id":"target-view"}]}}}
+    },
+    "space": {
+      "target-space": {"value":{"value":{"id":"target-space","name":"Target Space","plan_type":"team"}}}
+    },
+    "user_settings": {}
+  }
+}`
+	stubAccountDiscovery(t, responseBody, func(req *http.Request) {
+		if got := req.Header.Get("x-notion-active-user-header"); got != "" {
+			t.Fatalf("active user header = %q, want empty", got)
+		}
+	})
+
+	pool := NewAccountPool()
+	request := httptest.NewRequest(http.MethodPost, "/admin/accounts/add", strings.NewReader(
+		`{"token_v2":"secret-token","expected_email":"target@example.com"}`,
+	))
+	recorder := httptest.NewRecorder()
+	HandleAddAccount(pool, t.TempDir(), NewDashboardAuth("", "")).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", recorder.Code, recorder.Body.String())
+	}
+	if pool.Count() != 1 {
+		t.Fatalf("pool count = %d, want 1", pool.Count())
+	}
+	if account := pool.GetByEmail("target@example.com"); account == nil || account.UserID != "target-user" {
+		t.Fatalf("imported account = %#v, want target-user", account)
+	}
+}
