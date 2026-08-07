@@ -592,8 +592,9 @@ func HandleAddAccount(pool *AccountPool, accountsDir string, auth *DashboardAuth
 		}
 
 		var body struct {
-			TokenV2      string `json:"token_v2"`
-			NotionUserID string `json:"notion_user_id"`
+			TokenV2       string `json:"token_v2"`
+			NotionUserID  string `json:"notion_user_id"`
+			ExpectedEmail string `json:"expected_email"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -608,8 +609,10 @@ func HandleAddAccount(pool *AccountPool, accountsDir string, auth *DashboardAuth
 		log.Printf("[add-account] discovering account from token_v2 (%d chars)...", len(tokenV2))
 
 		// Discover account info
+		expectedEmail := strings.TrimSpace(body.ExpectedEmail)
 		acc, err := DiscoverAccountFromTokenWithOptions(tokenV2, AccountDiscoveryOptions{
-			ActiveUserID: strings.TrimSpace(body.NotionUserID),
+			ActiveUserID:  strings.TrimSpace(body.NotionUserID),
+			ExpectedEmail: expectedEmail,
 		})
 		if err != nil {
 			log.Printf("[add-account] discovery failed: %v", err)
