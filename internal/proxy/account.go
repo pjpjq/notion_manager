@@ -646,11 +646,12 @@ type quotaApplyResult struct {
 // The returned snapshot describes what changed so the caller can log the
 // transition without re-locking.
 func (p *AccountPool) applyQuotaInfo(acc *Account, info *QuotaInfo) quotaApplyResult {
+	acc.quotaObservationMu.Lock()
 	acc.mu.Lock()
-	previous := cloneQuotaInfo(acc.QuotaInfo)
 	defer func() {
 		acc.mu.Unlock()
-		logQuotaObservation(acc, previous, info)
+		defer acc.quotaObservationMu.Unlock()
+		logQuotaObservationLocked(acc, info)
 	}()
 	res := quotaApplyResult{WasPermanent: acc.PermanentlyExhausted}
 	now := time.Now()

@@ -492,7 +492,6 @@ func SaveAccountToFile(acc *Account, dir string) (string, error) {
 // AddAccount adds an account to the pool (hot-load, no restart needed).
 func (p *AccountPool) AddAccount(acc *Account) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	// Check for duplicate by account_id (same user_id + space_id)
 	acc.EnsureAccountID()
 	for i, existing := range p.accounts {
@@ -500,12 +499,20 @@ func (p *AccountPool) AddAccount(acc *Account) {
 		if existing.AccountID != "" && existing.AccountID == acc.AccountID {
 			// Replace existing (same workspace)
 			p.accounts[i] = acc
+			p.mu.Unlock()
 			log.Printf("[account] replaced: %s (%s) aid=%s", acc.UserName, acc.UserEmail, acc.ShortSpaceID())
+			if quota := acc.quotaInfoSnapshot(); quota != nil {
+				logQuotaObservation(acc, nil, quota)
+			}
 			return
 		}
 	}
 	p.accounts = append(p.accounts, acc)
+	p.mu.Unlock()
 	log.Printf("[account] added: %s (%s) [%s]", acc.UserName, acc.UserEmail, acc.PlanType)
+	if quota := acc.quotaInfoSnapshot(); quota != nil {
+		logQuotaObservation(acc, nil, quota)
+	}
 }
 
 // DeleteAccountFile removes the JSON file for an account from the accounts directory.
