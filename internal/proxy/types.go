@@ -61,6 +61,23 @@ type QuotaInfo struct {
 	PremiumBalance int  `json:"premiumBalance"` // remaining premium credits
 	PremiumUsage   int  `json:"premiumUsage"`   // used premium credits (monthlyAllocated)
 	PremiumLimit   int  `json:"premiumLimit"`   // total premium credit limit
+	// Raw V2 premium-credit fields. Keep the legacy Premium* aliases above for
+	// routing/dashboard compatibility, but retain every numeric source so an
+	// inference outage can be compared with the exact quota snapshot Notion
+	// returned instead of only the monthlyAllocated projection.
+	TotalCreditBalance    int   `json:"totalCreditBalance"`
+	CreditsInOverage      int   `json:"creditsInOverage"`
+	MonthlyAllocatedUsage int   `json:"monthlyAllocatedUsage"`
+	MonthlyAllocatedLimit int   `json:"monthlyAllocatedLimit"`
+	MonthlyCommittedUsage int   `json:"monthlyCommittedUsage"`
+	MonthlyCommittedLimit int   `json:"monthlyCommittedLimit"`
+	YearlyElasticUsage    int   `json:"yearlyElasticUsage"`
+	YearlyElasticLimit    int   `json:"yearlyElasticLimit"`
+	V2SpaceUsage          int   `json:"v2SpaceUsage"`
+	V2SpaceLimit          int   `json:"v2SpaceLimit"`
+	V2UserUsage           int   `json:"v2UserUsage"`
+	V2UserLimit           int   `json:"v2UserLimit"`
+	V2LastUsageAtMs       int64 `json:"v2LastSpaceUsageAtMs"`
 }
 
 // quotaV1Response is the raw response from getAIUsageEligibility
@@ -264,6 +281,7 @@ type CallOptions struct {
 	KnownToolCallURLs     *map[string][]string  // tool call id -> ordered web result URLs for resolving tool citations
 	Session               *Session              // multi-turn session (nil = first turn)
 	RequestID             string                // top-level API request ID for log correlation
+	ObservationKind       string                // safe diagnostics label: workflow, web_search, or researcher
 }
 
 // ========== Researcher Mode NDJSON Event Types ==========
