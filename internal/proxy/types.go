@@ -9,22 +9,23 @@ import (
 // ========== Account ==========
 
 type Account struct {
-	mu            sync.RWMutex
-	TokenV2       string       `json:"token_v2"`
-	UserID        string       `json:"user_id"`
-	UserName      string       `json:"user_name"`
-	UserEmail     string       `json:"user_email"`
-	SpaceID       string       `json:"space_id"`
-	SpaceName     string       `json:"space_name"`
-	AccountID     string       `json:"account_id,omitempty"` // SHA-256(user_id + "\0" + space_id)
-	SpaceViewID   string       `json:"space_view_id"`
-	PlanType      string       `json:"plan_type"`
-	Timezone      string       `json:"timezone"`
-	ClientVersion string       `json:"client_version"`
-	BrowserID     string       `json:"browser_id,omitempty"`
-	DeviceID      string       `json:"device_id,omitempty"`
-	FullCookie    string       `json:"full_cookie,omitempty"`
-	Models        []ModelEntry `json:"available_models"`
+	mu                 sync.RWMutex
+	quotaObservationMu sync.Mutex
+	TokenV2            string       `json:"token_v2"`
+	UserID             string       `json:"user_id"`
+	UserName           string       `json:"user_name"`
+	UserEmail          string       `json:"user_email"`
+	SpaceID            string       `json:"space_id"`
+	SpaceName          string       `json:"space_name"`
+	AccountID          string       `json:"account_id,omitempty"` // SHA-256(user_id + "\0" + space_id)
+	SpaceViewID        string       `json:"space_view_id"`
+	PlanType           string       `json:"plan_type"`
+	Timezone           string       `json:"timezone"`
+	ClientVersion      string       `json:"client_version"`
+	BrowserID          string       `json:"browser_id,omitempty"`
+	DeviceID           string       `json:"device_id,omitempty"`
+	FullCookie         string       `json:"full_cookie,omitempty"`
+	Models             []ModelEntry `json:"available_models"`
 	// RegisteredVia tags which Provider.ID() created this account (e.g.
 	// "microsoft"). Empty for accounts onboarded before the provider
 	// registry existed; the dashboard treats those as legacy Microsoft.
@@ -34,6 +35,8 @@ type Account struct {
 	QuotaInfo            *QuotaInfo `json:"-"`
 	QuotaCheckedAt       *time.Time `json:"-"`
 	PermanentlyExhausted bool       `json:"-"`
+	quotaObservationSeen bool
+	quotaObservationInfo *QuotaInfo
 	// Workspace probe state. SpaceCount is the number of `space_views`
 	// returned by /api/v3/loadUserContent for this account's user_root.
 	// 0 with WorkspaceCheckedAt != nil means the Notion onboarding

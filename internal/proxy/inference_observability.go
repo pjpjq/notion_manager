@@ -618,11 +618,36 @@ func (p *AccountPool) ObserveInferenceRequestAborted(acc *Account, requestID, mo
 // logQuotaObservation emits every safe numeric field from the V1/V2 quota
 // snapshot plus deltas. It intentionally accepts no request content and never
 // logs account email, tokens, or raw SpaceID.
-func logQuotaObservation(acc *Account, previous, current *QuotaInfo) {
-	_, workspaceHash, accountHash := observationIdentity(acc)
-	delta := quotaDelta(previous, current)
-	if previous != nil && !quotaDeltaChanged(delta) {
+func logQuotaObservation(acc *Account, _ *QuotaInfo, current *QuotaInfo) {
+	if acc == nil {
 		return
+	}
+	acc.quotaObservationMu.Lock()
+	defer acc.quotaObservationMu.Unlock()
+	logQuotaObservationLocked(acc, current)
+}
+
+// logQuotaObservationLocked requires acc.quotaObservationMu. Keeping quota
+// apply and emission under this per-account sequence lock prevents concurrent
+// refreshes from publishing reversed snapshots or deltas without holding the
+// main account mutex during log I/O.
+func logQuotaObservationLocked(acc *Account, current *QuotaInfo) {
+	_, workspaceHash, accountHash := observationIdentity(acc)
+	acc.mu.Lock()
+	initial := !acc.quotaObservationSeen
+	previousObserved := cloneQuotaInfo(acc.quotaObservationInfo)
+	currentObserved := cloneQuotaInfo(current)
+	if !initial && quotaSnapshot(previousObserved) == quotaSnapshot(currentObserved) {
+		acc.mu.Unlock()
+		return
+	}
+	acc.quotaObservationSeen = true
+	acc.quotaObservationInfo = currentObserved
+	acc.mu.Unlock()
+
+	var delta *quotaObservationDelta
+	if !initial {
+		delta = quotaDelta(previousObserved, currentObserved)
 	}
 	emitNotionObservation(quotaObservationEvent{
 		ObservedAt:      time.Now().UTC().Format(time.RFC3339Nano),
@@ -630,8 +655,8 @@ func logQuotaObservation(acc *Account, previous, current *QuotaInfo) {
 		DiagnosticOnly:  true,
 		WorkspaceSHA256: workspaceHash,
 		AccountSHA256:   accountHash,
-		Initial:         previous == nil,
-		Current:         quotaSnapshot(current),
+		Initial:         initial,
+		Current:         quotaSnapshot(currentObserved),
 		Delta:           delta,
 	})
 }

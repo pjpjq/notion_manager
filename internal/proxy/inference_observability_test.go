@@ -318,14 +318,16 @@ func TestInferenceObservationLogsAreSingleLineAndPrivate(t *testing.T) {
 	currentQuota.V2LastUsageAtMs = 2_100
 
 	acc := &Account{
-		TokenV2:    rawToken,
-		FullCookie: rawToken + "; cookie=secret",
-		UserID:     rawUser,
-		UserName:   rawName,
-		UserEmail:  rawEmail,
-		SpaceID:    rawSpace,
-		AccountID:  "raw-account-id",
-		QuotaInfo:  currentQuota,
+		TokenV2:              rawToken,
+		FullCookie:           rawToken + "; cookie=secret",
+		UserID:               rawUser,
+		UserName:             rawName,
+		UserEmail:            rawEmail,
+		SpaceID:              rawSpace,
+		AccountID:            "raw-account-id",
+		QuotaInfo:            currentQuota,
+		quotaObservationSeen: true,
+		quotaObservationInfo: cloneQuotaInfo(previousQuota),
 	}
 	pool := NewAccountPool()
 	pool.ObserveInferenceAttemptStart(acc, "req-safe", "grok-4.5", 1, 2, 4096)
@@ -481,6 +483,66 @@ func TestQuotaObservationInitialSnapshot(t *testing.T) {
 	}
 }
 
+func TestQuotaObservationEmitsInitialSnapshotWithPreloadedQuota(t *testing.T) {
+	events := captureNotionObservations(t)
+	quota := &QuotaInfo{IsEligible: true, SpaceUsage: 9, MonthlyAllocatedLimit: 300}
+	acc := &Account{UserID: "user", SpaceID: "workspace", QuotaInfo: cloneQuotaInfo(quota)}
+	logQuotaObservation(acc, quota, quota)
+	event := lastObservationEvent(t, *events, "quota_snapshot")
+	if event["initial"] != true {
+		t.Fatalf("preloaded quota was not emitted as initial: %#v", event)
+	}
+	if _, exists := event["delta"]; exists {
+		t.Fatalf("initial quota unexpectedly included delta: %#v", event)
+	}
+}
+
+func TestAddAccountEmitsInitialQuotaOnlyOnce(t *testing.T) {
+	events := captureNotionObservations(t)
+	acc := &Account{UserID: "user", SpaceID: "workspace", QuotaInfo: &QuotaInfo{IsEligible: true, SpaceUsage: 9}}
+	pool := NewAccountPool()
+	pool.AddAccount(acc)
+	pool.AddAccount(acc)
+	count := 0
+	for _, event := range *events {
+		if event["event"] == "quota_snapshot" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("quota initial events = %d, want 1: %#v", count, *events)
+	}
+}
+
+func TestConcurrentQuotaObservationsEndAtAppliedSnapshot(t *testing.T) {
+	events := captureNotionObservations(t)
+	acc := &Account{UserID: "user", SpaceID: "workspace"}
+	pool := NewAccountPool()
+	const updates = 128
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 1; i <= updates; i++ {
+		wg.Add(1)
+		go func(usage int) {
+			defer wg.Done()
+			<-start
+			pool.applyQuotaInfo(acc, &QuotaInfo{IsEligible: true, SpaceUsage: usage, SpaceLimit: 300})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	finalQuota := acc.quotaInfoSnapshot()
+	if finalQuota == nil {
+		t.Fatal("final quota is nil")
+	}
+	last := lastObservationEvent(t, *events, "quota_snapshot")
+	current, ok := last["current"].(map[string]interface{})
+	if !ok || current["space_usage"] != float64(finalQuota.SpaceUsage) {
+		t.Fatalf("last observation = %#v, final quota = %+v", last, finalQuota)
+	}
+}
+
 func TestNormalSuccessAndUnchangedQuotaStayQuiet(t *testing.T) {
 	var (
 		mu    sync.Mutex
@@ -501,6 +563,8 @@ func TestNormalSuccessAndUnchangedQuotaStayQuiet(t *testing.T) {
 	})
 
 	acc := &Account{UserID: "quiet-user", SpaceID: "quiet-space", QuotaInfo: &QuotaInfo{IsEligible: true, SpaceUsage: 1}}
+	acc.quotaObservationSeen = true
+	acc.quotaObservationInfo = cloneQuotaInfo(acc.QuotaInfo)
 	pool := NewAccountPool()
 	pool.ObserveInferenceAttemptStart(acc, "quiet-request", "grok-4.5", 1, 1, 20)
 	pool.ObserveInferenceSuccess(acc, "quiet-request", "grok-4.5", 1, 1, 20, time.Millisecond)
